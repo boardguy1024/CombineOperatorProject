@@ -46,6 +46,12 @@ class EventsViewController : UIViewController, UITableViewDataSource {
             })
             .disposed(by: bag)
         
+        days.asObservable()
+            .subscribe(onNext: { [weak self] days in
+                self?.daysLabel.text = "Last \(days) days"
+            })
+            .disposed(by: bag)
+        
         //days、eventsの最新valueを取得し、closureで受け取る
         //
         Observable.combineLatest(days.asObservable(), events.asObservable()) { (days, events) -> [EOEvent] in
