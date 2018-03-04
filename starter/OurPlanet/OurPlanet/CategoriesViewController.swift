@@ -53,22 +53,52 @@ class CategoriesViewController: UIViewController, UITableViewDataSource, UITable
     func startDownload() {
         // 1 처음에 categories 를 다운로드
         let eoCategories = EONET.categories
-        // 2 open 이벤트 close 이벤트를 concat 해서 이벤트데이터를 다운로드
-        let downloadedEvents = EONET.events(forLast: 360)
         
+        //eoCategoriesの各categoryがevents()をparallel的にfetchさせる
+        //それをmargeしてひとつのObservable<[EOEvent]>にする
+        let downloadedEvents = eoCategories.flatMap { categories in
+            // events()にeoCategoriesにある各categoryをパラメタに設定するためにmapを使用
+            return Observable.from(categories.map { category in
+                EONET.events(forLast: 360, category: category)
+            })
+        }
+        //単一ストリームに変換して返す
+        .merge()
      
+        
         // 3 카테고라이즈안의 카테고리 id 랑 event id 가 일치할때 그 이벤트를 카테고리.event 에 대입해서 반환함
-        let updatedCategories = Observable.combineLatest(eoCategories, downloadedEvents) { (categories, events) -> [EOCategory] in
-            return categories.map { category in
-                var cat = category
-                cat.events = events.filter {
-                    $0.categories.contains(category.id)
+//        let updatedCategories = Observable.combineLatest(eoCategories, downloadedEvents) { (categories, events) -> [EOCategory] in
+//            return categories.map { category in
+//                var cat = category
+//                cat.events = events.filter {
+//                    $0.categories.contains(category.id)
+//                }
+//                return cat
+//            }
+//        }
+        
+        // 上記で各カテゴリーごとにeventsを並列にfetchして一つのストリーム（downloadedEvents）へ流れてくるので
+        // ストーリムが流れてくるたびに、eoCategoriesをflatmapを使ってその中で
+        //downloadedEventsのscanでreplaceする
+        let updatedCategories = eoCategories.flatMap { categories in
+            
+            downloadedEvents.scan(categories) { updatedEvent, events in
+                
+                return updatedEvent.map { category in
+                    //updateされたeventsをcategoriesのなかでidがマッチしているcategory.eventにAddする
+                    let eventsForCategory = EONET.filteredEvents(events: events, forCategory: category)
+                    if !eventsForCategory.isEmpty {
+                        var cat = category
+                        cat.events = cat.events + eventsForCategory
+                        return cat
+                    }
+                    return category
                 }
-                return cat
             }
         }
         
         eoCategories
+            //ここで各categoryのupdateされたeventが流れてくるたびにtableViewがreloadされる
             .concat(updatedCategories)
             .bind(to: categories)
             .disposed(by: bag)
